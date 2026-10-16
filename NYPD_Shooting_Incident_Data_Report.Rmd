@@ -1,0 +1,6 @@
+---
+title: "NYPD_Shooting_Incident_Data_Report"
+author: "Kenneth B"
+date: "2026-10-09"
+output: html_document
+---
