@@ -1,0 +1,130 @@
+---
+title: "NYPD Shooting Incident Report"
+author: "Kenneth B"
+date: "2026-10-15"
+output: html_document
+---
+
+## Introduction
+
+This report analyzes the NYPD Shooting Incident Data (Historic) from NYC Open Data. It lists every shooting in New York City from 2006 to the end of the last complete year, including the date, borough, precinct, whether the shooting was a murder, and perpetrator and victim details.
+
+How have shootings and murders changed over time in NYC and in Brooklyn? Which precincts have the most and least amount of shootings? Can the number of shootings in a precinct predict the number of murders?
+
+## Importing the Data
+
+```{r import}
+library(tidyverse)
+library(lubridate)
+
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shootings <- read_csv(url_in)
+```
+
+## Tidying and Transforming
+
+```{r raw-summary}
+summary(shootings %>% select(-OCCUR_TIME))
+```
+
+I removed OCCUR_TIME because it kept giving errors.
+
+The summary shows missing values in the perpetrator and location columns. I keep only the columns I need, change `OCCUR_DATE` to a date, and change `BORO` and `PRECINCT` to factors.
+
+```{r tidy}
+shootings <- shootings %>%
+  select(INCIDENT_KEY, OCCUR_DATE, BORO, PRECINCT, STATISTICAL_MURDER_FLAG) %>%
+  mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+         BORO = as.factor(BORO),
+         PRECINCT = as.factor(PRECINCT))
+
+summary(shootings)
+```
+
+After cleaning, there is no missing data in the columns I kept. The perpetrator age, sex, and race columns were missing in about a third of the rows, probably because no suspect was identified. My analysis does not use them, so I removed them. If I did use them, I would label the missing values "Unknown" instead of deleting those rows, because deleting them would bias the data toward solved cases.
+
+## Visualizations and the Analysis
+
+```{r nyc-by-year}
+nyc_by_year <- shootings %>%
+  mutate(year = year(OCCUR_DATE)) %>%
+  group_by(year) %>%
+  summarize(shootings = n(),
+            murders = sum(STATISTICAL_MURDER_FLAG))
+
+tail(nyc_by_year)
+```
+
+### NYC shootings and murders per year
+
+```{r viz1}
+nyc_by_year %>%
+  ggplot(aes(x = year, y = shootings)) +
+  geom_line(aes(color = "shootings")) +
+  geom_point(aes(color = "shootings")) +
+  geom_line(aes(y = murders, color = "murders")) +
+  geom_point(aes(y = murders, color = "murders")) +
+  labs(title = "NYC Shootings and Murders per Year", y = NULL)
+```
+
+### Brooklyn shootings and murders per year
+
+```{r viz2}
+boro_by_year <- shootings %>%
+  mutate(year = year(OCCUR_DATE)) %>%
+  group_by(BORO, year) %>%
+  summarize(shootings = n(),
+            murders = sum(STATISTICAL_MURDER_FLAG))
+
+boro_by_year %>%
+  filter(BORO == "BROOKLYN") %>%
+  ggplot(aes(x = year, y = shootings)) +
+  geom_line(aes(color = "shootings")) +
+  geom_point(aes(color = "shootings")) +
+  geom_line(aes(y = murders, color = "murders")) +
+  geom_point(aes(y = murders, color = "murders")) +
+  labs(title = "Brooklyn Shootings and Murders per Year", y = NULL)
+```
+
+### Precincts with the most and fewest shootings
+
+```{r precincts}
+precinct_totals <- shootings %>%
+  group_by(PRECINCT) %>%
+  summarize(shootings = n(),
+            murders = sum(STATISTICAL_MURDER_FLAG))
+
+precinct_totals %>% slice_max(shootings, n = 10)
+precinct_totals %>% slice_min(shootings, n = 10)
+```
+
+Shootings fell from 2006 to a low around 2017–2019, and then nearly doubled in 2020–2021, and then declined again. Murders follow the same pattern. Brooklyn follows the citywide trend. Precinct 75 has the most shootings.
+
+The question is what caused the 2020 spike? Are some boroughs higher only because they have more people? Do some precincts have more murders than their number of shootings would predict?
+
+## Model
+
+```{r model}
+mod <- lm(murders ~ shootings, data = precinct_totals)
+summary(mod)
+
+precinct_w_pred <- precinct_totals %>% mutate(pred = predict(mod))
+
+precinct_w_pred %>%
+  ggplot() +
+  geom_point(aes(x = shootings, y = murders), color = "blue") +
+  geom_point(aes(x = shootings, y = pred), color = "red") +
+  labs(title = "Murders vs. Shootings by Precinct (blue = actual, red = predicted)")
+```
+
+According to the data about 1 in 5 shootings in a precinct is a murder. It fits well. Some precincts (blue dots) have more or fewer murders than predicted, which suggests that there areother factor that aren't in this data.
+
+## Conclusion and Bias
+
+NYC shootings declined from 2006 to 2019, then spiked in 2020–2021, and have been falling since. Murders follow the same pattern, and Brooklyn matches the citywide trend. Shootings are concentrated in a few precincts, and a linear model shows that about 1 in 5 shootings in a precinct is a murder.
+
+**Bias in the data:** Only reported shootings are included. Perpetrator information is missing for many cases. Areas with more police may have more complete records. Counts are not adjusted for population.
+
+**Bias in my analysis:** I chose which questions and columns to look at. My model is simple and shows a relationship, not a cause.
+
+**Personal bias:** When I started I assumed certain boroughs would be much more dangerous than others. I mitigated this by not analyzing perpetrator demographics since that data is incomplete
